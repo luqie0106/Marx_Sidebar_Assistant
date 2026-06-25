@@ -18,8 +18,15 @@ from ..services import chat_response
 
 router = APIRouter(tags=["chat"])
 
-# Load Whisper model once at startup ("base" for speed; "medium" for accuracy)
-_whisper_model = whisper.load_model("base")
+# Whisper model is loaded lazily on first voice request (avoids blocking startup/imports)
+_whisper_model = None
+
+
+def _get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        _whisper_model = whisper.load_model("base")
+    return _whisper_model
 
 
 # ── Shared response schema ────────────────────────────────────────────────────
@@ -66,7 +73,7 @@ async def chat_voice(audio: UploadFile = File(...)):
     try:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
-            None, lambda: _whisper_model.transcribe(tmp_path, language="zh")
+            None, lambda: _get_whisper_model().transcribe(tmp_path, language="zh")
         )
         transcript: str = result["text"].strip()
     finally:

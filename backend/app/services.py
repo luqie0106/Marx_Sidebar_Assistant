@@ -11,7 +11,10 @@ from pathlib import Path
 import edge_tts
 from openai import AsyncOpenAI
 
-from ..prompts import MARX_SYSTEM_PROMPT
+try:
+    from ..prompts import MARX_SYSTEM_PROMPT          # when run via FastAPI (backend/ package)
+except ImportError:
+    from app.prompts import MARX_SYSTEM_PROMPT        # when run via test_cli.py (backend/ on sys.path)
 
 # ── DeepSeek client ───────────────────────────────────────────────────────────
 _client = AsyncOpenAI(
