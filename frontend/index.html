@@ -196,6 +196,53 @@
     }
     .bubble.thinking { opacity: 0.55; font-style: italic; }
 
+    /* Speak button under Marx bubbles */
+    .speak-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      margin-top: 8px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid rgba(180,140,255,0.25);
+      background: rgba(100,60,200,0.18);
+      color: rgba(200,170,255,0.8);
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s, color 0.2s;
+      font-family: 'Noto Serif SC', serif;
+    }
+    .speak-btn:hover {
+      background: rgba(140,80,255,0.35);
+      box-shadow: 0 0 10px rgba(140,80,255,0.35);
+      color: rgba(230,210,255,1);
+    }
+    .speak-btn svg {
+      width: 11px; height: 11px;
+      fill: currentColor;
+      flex-shrink: 0;
+    }
+    .speak-btn.speaking {
+      background: rgba(200,40,80,0.35);
+      border-color: rgba(255,60,100,0.4);
+      color: #ff8090;
+      animation: speaking-pulse 1.2s ease-in-out infinite;
+    }
+    .speak-btn.paused {
+      background: rgba(80,160,80,0.25);
+      border-color: rgba(100,200,100,0.4);
+      color: #80e090;
+    }
+    .speak-btn.paused:hover {
+      background: rgba(80,200,80,0.4);
+      box-shadow: 0 0 10px rgba(80,200,80,0.35);
+    }
+    @keyframes speaking-pulse {
+      0%,100% { box-shadow: 0 0 6px rgba(200,40,80,0.5); }
+      50%      { box-shadow: 0 0 14px rgba(200,40,80,0.85); }
+    }
+
     /* Input row */
     #input-row {
       display: flex;
@@ -290,7 +337,7 @@
       <!-- Initial greeting bubble -->
       <div class="bubble marx">
         <div class="bubble-label">马克思</div>
-        世界哲学家，无产阶级代言人。有何高见？
+        <div class="bubble-text">世界哲学家，无产阶级代言人。有何高见？</div>
       </div>
     </div>
 
@@ -318,6 +365,8 @@
 <script type="importmap">
 {
   "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js/+esm",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
     "talkinghead": "https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.7/modules/talkinghead.mjs"
   }
 }
@@ -328,38 +377,18 @@ import { TalkingHead } from 'talkinghead';
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const API_BASE   = 'http://localhost:8000/api';
-const MODEL_PATH = './assets/marx.glb';
+// Ready Player Me avatar – TalkingHead requires RPM format with ARKit+Oculus morph targets.
+// Local model.glb is not RPM format and will not load. Using a hosted RPM avatar instead.
+const MODEL_PATH = 'https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb'
+  + '?morphTargets=ARKit,Oculus+Visemes'
+  + '&textureAtlas=none'
+  + '&lod=0';
 
-// ── TalkingHead init ─────────────────────────────────────────────────────────
-const frame   = document.getElementById('model-frame');
-const loading = document.getElementById('model-loading');
-
-// TalkingHead creates & manages its own WebGL canvas inside the given element.
-const head = new TalkingHead(frame, {
-  ttsEndpoint: null,      // we handle TTS on the backend; no built-in TTS needed
-  cameraView:  'upper',  // show head + shoulders in the frame
-});
-
-// Load the avatar and hide the loading overlay when ready
-try {
-  await head.showAvatar(
-    { url: MODEL_PATH },
-    (event) => {
-      if (event.lengthComputable) {
-        const pct = Math.round(event.loaded / event.total * 100);
-        loading.querySelector('span').textContent = `加载中 ${pct}%`;
-      }
-    }
-  );
-} catch (err) {
-  console.warn('Avatar load failed:', err);
-  loading.querySelector('span').textContent = '模型加载失败';
-}
-loading.style.display = 'none';
-
+// ── TalkingHead handle (assigned after async init below) ─────────────────────
+let head = null;
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  Chat UI Logic
+//  Chat UI Logic  (registered synchronously — NOT blocked by avatar loading)
 // ══════════════════════════════════════════════════════════════════════════════
 const bubbleArea = document.getElementById('bubble-area');
 const textInput  = document.getElementById('text-input');
@@ -371,7 +400,11 @@ function addBubble(role, text, classes = []) {
   const div = document.createElement('div');
   div.className = `bubble ${role}` + (classes.length ? ' ' + classes.join(' ') : '');
   if (role === 'marx') {
-    div.innerHTML = `<div class="bubble-label">马克思</div>${escHtml(text)}`;
+    div.innerHTML = `<div class="bubble-label">马克思</div><div class="bubble-text">${escHtml(text)}</div>`;
+    // Only add speak button for real replies (not 'thinking' placeholder)
+    if (!classes.includes('thinking')) {
+      div.appendChild(makeSpeakBtn(text));
+    }
   } else {
     div.textContent = text;
   }
@@ -384,18 +417,140 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// ── Speak button: icons & state helpers ──────────────────────────────────────
+const ICON_SPEAK  = `<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>`;
+const ICON_PAUSE  = `<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
+const ICON_RESUME = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
+const ICON_REPLAY = `<svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>`;
+
+function setBtn(btn, state) {
+  btn.classList.remove('speaking', 'paused');
+  if (state === 'idle')    { btn.innerHTML = ICON_SPEAK  + '朗读'; }
+  if (state === 'replay')  { btn.innerHTML = ICON_REPLAY + '重播'; }
+  if (state === 'playing') { btn.classList.add('speaking'); btn.innerHTML = ICON_PAUSE  + '暂停'; }
+  if (state === 'paused')  { btn.classList.add('paused');   btn.innerHTML = ICON_RESUME + '继续'; }
+}
+
+// Single global tracker – only one audio plays at a time
+let _activeAudio = null;
+let _activeBtn   = null;
+
+function _stopActive() {
+  if (_activeAudio) {
+    _activeAudio.pause();
+    _activeAudio.currentTime = 0;
+    _activeAudio = null;
+  }
+  if (_activeBtn) {
+    setBtn(_activeBtn, 'replay');
+    _activeBtn = null;
+  }
+}
+
+/**
+ * Create a speak button with full pause / resume / replay support.
+ * Each button caches its audio URL after the first fetch.
+ */
+function makeSpeakBtn(text) {
+  const btn = document.createElement('button');
+  btn.className = 'speak-btn';
+  setBtn(btn, 'idle');
+
+  let audioUrl = null;   // cached object URL after first fetch
+  let audio    = null;   // current Audio element for this button
+
+  btn.addEventListener('click', async () => {
+    // ── If another button is actively playing, stop it first ──────────────
+    if (_activeAudio && _activeAudio !== audio) {
+      _stopActive();
+    }
+
+    // ── Resume from pause ─────────────────────────────────────────────────
+    if (audio && audio.paused && !audio.ended) {
+      audio.play();
+      _activeAudio = audio;
+      _activeBtn   = btn;
+      setBtn(btn, 'playing');
+      return;
+    }
+
+    // ── Pause current playback ────────────────────────────────────────────
+    if (audio && !audio.paused) {
+      audio.pause();
+      setBtn(btn, 'paused');
+      return;
+    }
+
+    // ── First play or replay (audio ended / not yet fetched) ──────────────
+    setBtn(btn, 'playing');
+
+    try {
+      // Fetch TTS only once; reuse the blob URL on replay
+      if (!audioUrl) {
+        const res = await fetch(`${API_BASE}/tts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { audio_base64 } = await res.json();
+        const bytes = Uint8Array.from(atob(audio_base64), c => c.charCodeAt(0));
+        const blob  = new Blob([bytes], { type: 'audio/mpeg' });
+        audioUrl    = URL.createObjectURL(blob);
+      }
+
+      audio        = new Audio(audioUrl);
+      _activeAudio = audio;
+      _activeBtn   = btn;
+
+      audio.onpause = () => {
+        if (!audio.ended) setBtn(btn, 'paused');
+      };
+      audio.onended = () => {
+        setBtn(btn, 'replay');
+        if (_activeAudio === audio) { _activeAudio = null; _activeBtn = null; }
+      };
+      audio.onerror = () => {
+        setBtn(btn, 'idle');
+        if (_activeAudio === audio) { _activeAudio = null; _activeBtn = null; }
+      };
+
+      audio.play();
+    } catch (err) {
+      console.warn('speakText error:', err);
+      setBtn(btn, 'idle');
+    }
+  });
+
+  return btn;
+}
+
 /**
  * Decode base64 MP3 → AudioBuffer, then pass to TalkingHead.speakAudio().
- * TalkingHead analyses the waveform in real-time to drive Chinese lip-sync,
- * idle→speaking animation transitions, and micro-expressions automatically.
+ * Falls back to plain Audio playback if TalkingHead is not yet ready.
  */
 async function speakWithHead(audio_base64) {
   const binaryStr  = atob(audio_base64);
   const bytes      = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
-  const audioCtx   = new AudioContext();
-  const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
-  await head.speakAudio(audioBuffer);
-  audioCtx.close();
+  try {
+    const audioCtx    = new AudioContext();
+    const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+    if (head && typeof head.speakAudio === 'function') {
+      await head.speakAudio(audioBuffer);
+    } else {
+      const source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioCtx.destination);
+      await new Promise(resolve => { source.onended = resolve; source.start(); });
+    }
+    audioCtx.close();
+  } catch (err) {
+    console.warn('speakWithHead failed, using <audio> fallback:', err);
+    const blob  = new Blob([bytes], { type: 'audio/mpeg' });
+    const url   = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    await audio.play().catch(() => {});
+  }
 }
 
 
@@ -419,8 +574,6 @@ async function sendText() {
 
     thinking.remove();
     addBubble('marx', data.reply);
-
-    // Drive lip-sync with the returned MP3 audio
     await speakWithHead(data.audio_base64);
 
   } catch (e) {
@@ -472,14 +625,11 @@ recordBtn.addEventListener('click', async () => {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      // { transcript, reply, audio_base64 }
-      const data = await res.json();
+      const data = await res.json();   // { transcript, reply, audio_base64 }
       thinking.remove();
 
       if (data.transcript) addBubble('user', `🎙 ${data.transcript}`);
       if (data.reply)      addBubble('marx', data.reply);
-
-      // Drive lip-sync with the returned MP3 audio
       await speakWithHead(data.audio_base64);
 
     } catch (e) {
@@ -491,6 +641,33 @@ recordBtn.addEventListener('click', async () => {
   mediaRecorder.start();
   recordBtn.classList.add('recording');
 });
+
+
+// ── TalkingHead init (async — runs AFTER all UI listeners registered) ─────────
+const frame   = document.getElementById('model-frame');
+const loading = document.getElementById('model-loading');
+
+head = new TalkingHead(frame, {
+  ttsEndpoint: null,     // TTS handled by backend
+  cameraView:  'upper',  // head + shoulders view
+});
+
+try {
+  await head.showAvatar(
+    { url: MODEL_PATH },
+    (event) => {
+      if (event.lengthComputable) {
+        const pct = Math.round(event.loaded / event.total * 100);
+        loading.querySelector('span').textContent = `加载中 ${pct}%`;
+      }
+    }
+  );
+  loading.style.display = 'none';
+} catch (err) {
+  console.warn('Avatar load failed:', err);
+  loading.querySelector('span').textContent = '模型加载失败';
+  // Keep overlay visible as error indicator
+}
 </script>
 </body>
 </html>

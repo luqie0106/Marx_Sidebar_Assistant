@@ -7,6 +7,7 @@ Chat router – two endpoints, both return unified JSON:
 """
 
 import asyncio
+import os
 import tempfile
 from pathlib import Path
 
@@ -15,6 +16,16 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from ..services import chat_response
+
+# ── macOS SSL fix ─────────────────────────────────────────────────────────────
+# Python 3.13 on macOS ships without system CA certificates in its bundle.
+# Whisper downloads model weights via HTTPS, so we point it at certifi's bundle.
+try:
+    import certifi
+    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
+except ImportError:
+    pass  # certifi not installed — SSL will use system defaults
 
 router = APIRouter(tags=["chat"])
 
@@ -84,3 +95,27 @@ async def chat_voice(audio: UploadFile = File(...)):
 
     chat_result = await chat_response(transcript)
     return VoiceResponse(transcript=transcript, **chat_result)
+
+
+# ── /api/tts ──────────────────────────────────────────────────────────────────
+class TTSRequest(BaseModel):
+    text: str
+
+
+class TTSResponse(BaseModel):
+    audio_base64: str
+
+
+@router.post("/tts", response_model=TTSResponse)
+async def tts_endpoint(body: TTSRequest):
+    """Synthesize arbitrary text to MP3 and return as base64.
+    Used by the frontend 'speak' button on each Marx reply bubble."""
+    if not body.text.strip():
+        raise HTTPException(status_code=400, detail="text cannot be empty")
+
+    from ..services import tts_synthesize
+    import base64
+
+    audio_bytes = await tts_synthesize(body.text)
+    return TTSResponse(audio_base64=base64.b64encode(audio_bytes).decode("utf-8"))
+

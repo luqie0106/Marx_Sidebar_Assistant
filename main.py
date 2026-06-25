@@ -5,6 +5,10 @@ Entry point for the application (run from project root).
 
 import sys
 import os
+from dotenv import load_dotenv
+
+# 加载 .env 环境变量
+load_dotenv(os.path.join(os.path.dirname(__file__), "backend", ".env"))
 
 # Ensure backend/ is on the path so `app` package can be found
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backend"))

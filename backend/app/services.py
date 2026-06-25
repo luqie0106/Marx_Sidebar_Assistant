@@ -5,6 +5,7 @@ Returns a unified dict: { "reply": str, "audio_base64": str }
 
 import base64
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -41,13 +42,43 @@ async def llm_reply(user_text: str) -> str:
     return response.choices[0].message.content.strip()
 
 
+# ── TTS helpers ───────────────────────────────────────────────────────────────
+_BRACKET_RE = re.compile(
+    r'[\(\uff08][^\)\uff09]{0,30}[\)\uff09]'   # (text) or （text）, max 30 chars
+    r'|[\[\u3010][^\]\u3011]{0,30}[\]\u3011]'   # [text] or 【text】
+    r'|\u300a[^》]{0,30}\u300b'                # 《text》 (book titles – skip if brief)
+)
+
+
+def _strip_stage_directions(text: str) -> str:
+    """Remove short parenthetical / bracketed stage directions from TTS input.
+
+    Examples stripped:
+      （冷笑） → ""
+      (laughs) → ""
+      [停顿] → ""
+    Longer bracketed content (> 30 chars) is kept to avoid removing meaningful text.
+    Multiple adjacent spaces are collapsed after removal.
+    """
+    cleaned = _BRACKET_RE.sub('', text)
+    # Collapse extra whitespace left behind
+    cleaned = re.sub(r'[ \t]{2,}', ' ', cleaned).strip()
+    return cleaned
+
+
 # ── TTS ───────────────────────────────────────────────────────────────────────
 async def tts_synthesize(text: str) -> bytes:
-    """Synthesize text to MP3 bytes via edge-tts."""
+    """Synthesize text to MP3 bytes via edge-tts.
+    Strips parenthetical stage directions (e.g. （冷笑）, (laughs)) before synthesis.
+    """
+    clean = _strip_stage_directions(text)
+    if not clean.strip():
+        clean = text   # fallback: use original if stripping removed everything
+
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
         tmp_path = tmp.name
 
-    communicate = edge_tts.Communicate(text, TTS_VOICE)
+    communicate = edge_tts.Communicate(clean, TTS_VOICE)
     await communicate.save(tmp_path)
 
     audio_bytes = Path(tmp_path).read_bytes()
