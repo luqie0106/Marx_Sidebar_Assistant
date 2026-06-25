@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marx AI Assistant — 3D Demo</title>
+  <meta name="description" content="网页边缘悬浮的 3D 马克思 AI 助手前端演示" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background: radial-gradient(ellipse at 30% 20%, #1a1040 0%, #0b0b1a 60%, #000 100%);
+      font-family: 'Inter', sans-serif;
+      color: #e8e0d0;
+      overflow-x: hidden;
+    }
+
+    /* Demo page background hint */
+    .page-hint {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      opacity: 0.12;
+      pointer-events: none;
+      user-select: none;
+    }
+    .page-hint h1 { font-size: clamp(2rem, 5vw, 4rem); font-family: 'Noto Serif SC'; }
+    .page-hint p  { font-size: 1rem; margin-top: 0.5rem; }
+
+    /* ── Floating Widget Container ────────────────────────────────────────── */
+    #marx-widget {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      width: 340px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 10px;
+      z-index: 9999;
+      font-family: 'Noto Serif SC', serif;
+    }
+
+    /* ── 3D Model Canvas ─────────────────────────────────────────────────── */
+    #model-frame {
+      width: 200px;
+      height: 260px;
+      border-radius: 18px;
+      overflow: hidden;
+      background: linear-gradient(160deg, #1e1535 0%, #0d0d22 100%);
+      border: 1px solid rgba(180, 140, 255, 0.25);
+      box-shadow:
+        0 0 40px rgba(140, 80, 255, 0.25),
+        0 20px 60px rgba(0, 0, 0, 0.6),
+        inset 0 1px 0 rgba(255,255,255,0.08);
+      cursor: pointer;
+      transition: transform 0.35s cubic-bezier(.34,1.56,.64,1),
+                  box-shadow 0.35s ease;
+      position: relative;
+    }
+    #model-frame:hover {
+      transform: translateY(-6px) scale(1.03);
+      box-shadow:
+        0 0 60px rgba(140, 80, 255, 0.45),
+        0 28px 70px rgba(0, 0, 0, 0.7),
+        inset 0 1px 0 rgba(255,255,255,0.12);
+    }
+    /* TalkingHead injects its own canvas – make sure it fills the frame */
+    #model-frame canvas {
+      width: 100% !important;
+      height: 100% !important;
+      display: block;
+    }
+    /* Loading overlay */
+    #model-loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: rgba(13, 13, 34, 0.85);
+      border-radius: 18px;
+      font-size: 0.75rem;
+      color: rgba(180,140,255,0.7);
+      letter-spacing: 0.08em;
+    }
+    .spinner {
+      width: 32px; height: 32px;
+      border: 2.5px solid rgba(140,80,255,0.2);
+      border-top-color: rgba(140,80,255,0.9);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Name badge */
+    #model-badge {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(180,140,255,0.3);
+      border-radius: 20px;
+      padding: 3px 14px;
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      color: rgba(220, 200, 255, 0.9);
+      white-space: nowrap;
+    }
+
+    /* ── Chat Panel ─────────────────────────────────────────────────────────── */
+    #chat-panel {
+      width: 340px;
+      background: rgba(16, 12, 32, 0.82);
+      backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid rgba(180, 140, 255, 0.2);
+      border-radius: 18px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
+      overflow: hidden;
+    }
+
+    /* Chat header */
+    #chat-header {
+      padding: 12px 16px;
+      background: linear-gradient(90deg, rgba(100,60,200,0.4) 0%, rgba(60,30,120,0.2) 100%);
+      border-bottom: 1px solid rgba(180,140,255,0.15);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .header-dot {
+      width: 8px; height: 8px;
+      background: #a855f7;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #a855f7;
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%,100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: 0.5; transform: scale(0.7); }
+    }
+    #chat-header span { font-size: 0.8rem; color: rgba(220,200,255,0.85); letter-spacing: 0.06em; }
+
+    /* Bubble area */
+    #bubble-area {
+      padding: 14px;
+      min-height: 120px;
+      max-height: 240px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(140,80,255,0.3) transparent;
+    }
+
+    .bubble {
+      max-width: 90%;
+      padding: 10px 14px;
+      border-radius: 14px;
+      font-size: 0.82rem;
+      line-height: 1.6;
+      animation: bubble-in 0.3s cubic-bezier(.34,1.56,.64,1) both;
+    }
+    @keyframes bubble-in {
+      from { opacity: 0; transform: translateY(10px) scale(0.95); }
+      to   { opacity: 1; transform: none; }
+    }
+    .bubble.user {
+      align-self: flex-end;
+      background: rgba(100, 60, 200, 0.4);
+      border: 1px solid rgba(160,100,255,0.3);
+      color: #ddd;
+    }
+    .bubble.marx {
+      align-self: flex-start;
+      background: rgba(30, 20, 60, 0.7);
+      border: 1px solid rgba(180,140,255,0.2);
+      color: #e8e0d0;
+    }
+    .bubble.marx .bubble-label {
+      font-size: 0.65rem;
+      color: rgba(180,140,255,0.7);
+      margin-bottom: 4px;
+      letter-spacing: 0.08em;
+    }
+    .bubble.thinking { opacity: 0.55; font-style: italic; }
+
+    /* Input row */
+    #input-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 12px;
+      border-top: 1px solid rgba(180,140,255,0.12);
+      background: rgba(10,8,22,0.6);
+    }
+    #text-input {
+      flex: 1;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(180,140,255,0.2);
+      border-radius: 10px;
+      padding: 8px 12px;
+      color: #e0d8f0;
+      font-size: 0.82rem;
+      font-family: 'Noto Serif SC', serif;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    #text-input::placeholder { color: rgba(180,140,255,0.35); }
+    #text-input:focus {
+      border-color: rgba(160,100,255,0.6);
+      box-shadow: 0 0 0 3px rgba(140,80,255,0.12);
+    }
+
+    .icon-btn {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      border: 1px solid rgba(180,140,255,0.25);
+      background: rgba(100,60,200,0.25);
+      color: rgba(200,170,255,0.85);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
+      flex-shrink: 0;
+    }
+    .icon-btn:hover {
+      background: rgba(140,80,255,0.45);
+      box-shadow: 0 0 12px rgba(140,80,255,0.4);
+      transform: scale(1.08);
+    }
+    .icon-btn:active { transform: scale(0.95); }
+    .icon-btn svg   { width: 16px; height: 16px; fill: currentColor; }
+
+    #record-btn.recording {
+      background: rgba(200, 40, 80, 0.5);
+      border-color: rgba(255, 60, 100, 0.5);
+      color: #ff6080;
+      animation: recording-pulse 1s ease-in-out infinite;
+      box-shadow: 0 0 16px rgba(200, 40, 80, 0.6);
+    }
+    @keyframes recording-pulse {
+      0%,100% { box-shadow: 0 0 16px rgba(200,40,80,0.6); }
+      50%      { box-shadow: 0 0 28px rgba(200,40,80,0.9); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Demo background hint -->
+<div class="page-hint">
+  <h1>Marx AI Assistant</h1>
+  <p>3D Floating Widget Demo</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Floating Widget
+══════════════════════════════════════════════════════════════════ -->
+<div id="marx-widget">
+
+  <!-- 3D Model Frame – TalkingHead will inject its canvas here -->
+  <div id="model-frame">
+    <div id="model-loading">
+      <div class="spinner"></div>
+      <span>加载模型中…</span>
+    </div>
+    <div id="model-badge">卡尔 · 马克思</div>
+  </div>
+
+  <!-- Chat Panel -->
+  <div id="chat-panel">
+    <div id="chat-header">
+      <div class="header-dot"></div>
+      <span>MARX AI · 在线</span>
+    </div>
+
+    <div id="bubble-area">
+      <!-- Initial greeting bubble -->
+      <div class="bubble marx">
+        <div class="bubble-label">马克思</div>
+        世界哲学家，无产阶级代言人。有何高见？
+      </div>
+    </div>
+
+    <div id="input-row">
+      <input id="text-input" type="text" placeholder="向马克思提问…" maxlength="200" />
+
+      <!-- Send button -->
+      <button id="send-btn" class="icon-btn" title="发送">
+        <svg viewBox="0 0 24 24"><path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+      </button>
+
+      <!-- Record button -->
+      <button id="record-btn" class="icon-btn" title="语音输入">
+        <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm-1 1.93A5.002 5.002 0 0 1 7 11H5a7 7 0 0 0 6 6.93V20H9v2h6v-2h-2v-2.07A7 7 0 0 0 19 11h-2a5 5 0 0 1-4 4.93z"/></svg>
+      </button>
+    </div>
+  </div>
+
+</div><!-- #marx-widget -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     TalkingHead via CDN (no local source copy needed)
+══════════════════════════════════════════════════════════════════ -->
+<script type="importmap">
+{
+  "imports": {
+    "talkinghead": "https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.7/modules/talkinghead.mjs"
+  }
+}
+</script>
+
+<script type="module">
+import { TalkingHead } from 'talkinghead';
+
+// ── Config ───────────────────────────────────────────────────────────────────
+const API_BASE   = 'http://localhost:8000/api';
+const MODEL_PATH = './assets/marx.glb';
+
+// ── TalkingHead init ─────────────────────────────────────────────────────────
+const frame   = document.getElementById('model-frame');
+const loading = document.getElementById('model-loading');
+
+// TalkingHead creates & manages its own WebGL canvas inside the given element.
+const head = new TalkingHead(frame, {
+  ttsEndpoint: null,      // we handle TTS on the backend; no built-in TTS needed
+  cameraView:  'upper',  // show head + shoulders in the frame
+});
+
+// Load the avatar and hide the loading overlay when ready
+try {
+  await head.showAvatar(
+    { url: MODEL_PATH },
+    (event) => {
+      if (event.lengthComputable) {
+        const pct = Math.round(event.loaded / event.total * 100);
+        loading.querySelector('span').textContent = `加载中 ${pct}%`;
+      }
+    }
+  );
+} catch (err) {
+  console.warn('Avatar load failed:', err);
+  loading.querySelector('span').textContent = '模型加载失败';
+}
+loading.style.display = 'none';
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Chat UI Logic
+// ══════════════════════════════════════════════════════════════════════════════
+const bubbleArea = document.getElementById('bubble-area');
+const textInput  = document.getElementById('text-input');
+const sendBtn    = document.getElementById('send-btn');
+const recordBtn  = document.getElementById('record-btn');
+
+/** Append a bubble and scroll to it */
+function addBubble(role, text, classes = []) {
+  const div = document.createElement('div');
+  div.className = `bubble ${role}` + (classes.length ? ' ' + classes.join(' ') : '');
+  if (role === 'marx') {
+    div.innerHTML = `<div class="bubble-label">马克思</div>${escHtml(text)}`;
+  } else {
+    div.textContent = text;
+  }
+  bubbleArea.appendChild(div);
+  bubbleArea.scrollTop = bubbleArea.scrollHeight;
+  return div;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/**
+ * Decode base64 MP3 → AudioBuffer, then pass to TalkingHead.speakAudio().
+ * TalkingHead analyses the waveform in real-time to drive Chinese lip-sync,
+ * idle→speaking animation transitions, and micro-expressions automatically.
+ */
+async function speakWithHead(audio_base64) {
+  const binaryStr  = atob(audio_base64);
+  const bytes      = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
+  const audioCtx   = new AudioContext();
+  const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+  await head.speakAudio(audioBuffer);
+  audioCtx.close();
+}
+
+
+// ── /api/chat_text ────────────────────────────────────────────────────────────
+async function sendText() {
+  const msg = textInput.value.trim();
+  if (!msg) return;
+  textInput.value = '';
+
+  addBubble('user', msg);
+  const thinking = addBubble('marx', '思考中…', ['thinking']);
+
+  try {
+    const res = await fetch(`${API_BASE}/chat_text`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ message: msg }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();   // { reply, audio_base64 }
+
+    thinking.remove();
+    addBubble('marx', data.reply);
+
+    // Drive lip-sync with the returned MP3 audio
+    await speakWithHead(data.audio_base64);
+
+  } catch (e) {
+    thinking.remove();
+    addBubble('marx', `[错误] ${e.message}`);
+  }
+}
+
+sendBtn.addEventListener('click', sendText);
+textInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) sendText(); });
+
+
+// ── /api/chat_voice ───────────────────────────────────────────────────────────
+let mediaRecorder = null;
+let audioChunks   = [];
+
+recordBtn.addEventListener('click', async () => {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    recordBtn.classList.remove('recording');
+    return;
+  }
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    alert('无法访问麦克风，请检查浏览器权限。');
+    return;
+  }
+
+  audioChunks   = [];
+  mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+  mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+
+  mediaRecorder.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+
+    const blob     = new Blob(audioChunks, { type: 'audio/webm' });
+    const formData = new FormData();
+    formData.append('audio', blob, 'recording.webm');
+
+    const thinking = addBubble('marx', '识别语音中…', ['thinking']);
+
+    try {
+      const res = await fetch(`${API_BASE}/chat_voice`, {
+        method: 'POST',
+        body:   formData,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // { transcript, reply, audio_base64 }
+      const data = await res.json();
+      thinking.remove();
+
+      if (data.transcript) addBubble('user', `🎙 ${data.transcript}`);
+      if (data.reply)      addBubble('marx', data.reply);
+
+      // Drive lip-sync with the returned MP3 audio
+      await speakWithHead(data.audio_base64);
+
+    } catch (e) {
+      thinking.remove();
+      addBubble('marx', `[错误] ${e.message}`);
+    }
+  };
+
+  mediaRecorder.start();
+  recordBtn.classList.add('recording');
+});
+</script>
+</body>
+</html>
