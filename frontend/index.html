@@ -378,11 +378,8 @@ import { TalkingHead } from 'talkinghead';
 // ── Config ───────────────────────────────────────────────────────────────────
 const API_BASE   = 'http://localhost:8000/api';
 // Ready Player Me avatar – TalkingHead requires RPM format with ARKit+Oculus morph targets.
-// Local model.glb is not RPM format and will not load. Using a hosted RPM avatar instead.
-const MODEL_PATH = 'https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb'
-  + '?morphTargets=ARKit,Oculus+Visemes'
-  + '&textureAtlas=none'
-  + '&lod=0';
+// 已经将模型路径指向项目里自带且测试通过的男模型
+const MODEL_PATH = '/assets/marx.glb';
 
 // ── TalkingHead handle (assigned after async init below) ─────────────────────
 let head = null;
