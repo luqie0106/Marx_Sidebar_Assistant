@@ -67,23 +67,46 @@ def _strip_stage_directions(text: str) -> str:
 
 
 # ── TTS ───────────────────────────────────────────────────────────────────────
-async def tts_synthesize(text: str) -> bytes:
+async def tts_synthesize(text: str, max_retries: int = 3) -> bytes:
     """Synthesize text to MP3 bytes via edge-tts.
-    Strips parenthetical stage directions (e.g. （冷笑）, (laughs)) before synthesis.
+
+    Strips parenthetical stage directions before synthesis.
+    Retries up to `max_retries` times on NoAudioReceived (an intermittent
+    edge-tts / Microsoft server WebSocket issue).
     """
+    import asyncio
+    from edge_tts.exceptions import NoAudioReceived
+
     clean = _strip_stage_directions(text)
     if not clean.strip():
         clean = text   # fallback: use original if stripping removed everything
 
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-        tmp_path = tmp.name
+    last_error = None
+    for attempt in range(max_retries):
+        if attempt > 0:
+            # Exponential back-off: 1s, 2s, 4s …
+            await asyncio.sleep(2 ** (attempt - 1))
 
-    communicate = edge_tts.Communicate(clean, TTS_VOICE)
-    await communicate.save(tmp_path)
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                tmp_path = tmp.name
 
-    audio_bytes = Path(tmp_path).read_bytes()
-    Path(tmp_path).unlink(missing_ok=True)
-    return audio_bytes
+            communicate = edge_tts.Communicate(clean, TTS_VOICE)
+            await communicate.save(tmp_path)
+
+            audio_bytes = Path(tmp_path).read_bytes()
+            return audio_bytes
+
+        except NoAudioReceived as exc:
+            last_error = exc
+            print(f"[TTS] NoAudioReceived on attempt {attempt + 1}/{max_retries}, retrying…")
+            continue
+        finally:
+            if tmp_path:
+                Path(tmp_path).unlink(missing_ok=True)
+
+    raise last_error
 
 
 # ── Unified pipeline ──────────────────────────────────────────────────────────

@@ -43,7 +43,7 @@ def _get_whisper_model():
 # ── Shared response schema ────────────────────────────────────────────────────
 class ChatResponse(BaseModel):
     reply:        str
-    audio_base64: str
+    audio_base64: str = ""   # empty string when TTS is unavailable
 
 
 # ── /api/chat_text ────────────────────────────────────────────────────────────
@@ -71,6 +71,7 @@ async def chat_voice(audio: UploadFile = File(...)):
     """
     Pipeline: audio upload → Whisper STT → LLM → edge-tts
     Returns JSON with transcript, reply text, and base64-encoded MP3.
+    audio_base64 will be empty string if TTS synthesis fails.
     """
     audio_bytes = await audio.read()
     if not audio_bytes:
@@ -109,13 +110,17 @@ class TTSResponse(BaseModel):
 @router.post("/tts", response_model=TTSResponse)
 async def tts_endpoint(body: TTSRequest):
     """Synthesize arbitrary text to MP3 and return as base64.
-    Used by the frontend 'speak' button on each Marx reply bubble."""
+    Returns empty audio_base64 if edge-tts is unavailable (frontend will use Web Speech API)."""
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="text cannot be empty")
 
     from ..services import tts_synthesize
     import base64
 
-    audio_bytes = await tts_synthesize(body.text)
-    return TTSResponse(audio_base64=base64.b64encode(audio_bytes).decode("utf-8"))
+    try:
+        audio_bytes = await tts_synthesize(body.text)
+        return TTSResponse(audio_base64=base64.b64encode(audio_bytes).decode("utf-8"))
+    except Exception as exc:
+        print(f"[TTS] All retries failed, returning empty audio: {exc}")
+        return TTSResponse(audio_base64="")
 
